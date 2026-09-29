@@ -1,6 +1,38 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { stats, sentimentTrend, alerts as initialAlerts, topics, recentPosts } from './data.js'
+import {
+  stats,
+  sentimentTrend,
+  alerts as initialAlerts,
+  topics,
+  recentPosts,
+  trendSummary,
+  trendStages,
+  emergingTrends,
+} from './data.js'
+
+const TREND_PLATFORMS = ['All', 'Instagram', 'YouTube', 'Twitter', 'Reddit', 'LinkedIn']
+
+const moveClass = {
+  'Join in': 'move-join',
+  'Post a reply': 'move-reply',
+  'Watch only': 'move-watch',
+  'Let it pass': 'move-pass',
+}
+
+// Builds a sparkline path from a 7-day volume series.
+const sparkPath = (values, width = 100, height = 28) => {
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  const span = max - min || 1
+  return values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * width
+      const y = height - 2 - ((v - min) / span) * (height - 4)
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard')
@@ -8,6 +40,9 @@ export default function App() {
   const [filterSource, setFilterSource] = useState('All')
   const [actionNotice, setActionNotice] = useState('')
   const [highlightedId, setHighlightedId] = useState(null)
+  const [trendPlatform, setTrendPlatform] = useState('All')
+  const [trendStage, setTrendStage] = useState('All')
+  const [trackedTrends, setTrackedTrends] = useState([])
 
   // Smooth scroll and visual feedback redirect handler
   const scrollToSection = (sectionId, tabName) => {
@@ -41,6 +76,8 @@ export default function App() {
       setTimeout(() => scrollToSection('alerts-section', 'Alerts'), 150)
     } else if (hash === 'mentions' || hash === 'mentions-section') {
       setTimeout(() => scrollToSection('mentions-section', 'Mentions'), 150)
+    } else if (hash === 'trends' || hash === 'trends-section') {
+      setTimeout(() => scrollToSection('trends-section', 'Emerging Trends'), 150)
     }
   }, [])
 
@@ -49,9 +86,12 @@ export default function App() {
     const handleScroll = () => {
       const alertsEl = document.getElementById('alerts-section')
       const mentionsEl = document.getElementById('mentions-section')
+      const trendsEl = document.getElementById('trends-section')
       const scrollPos = window.scrollY + 120
 
-      if (mentionsEl && scrollPos >= mentionsEl.offsetTop) {
+      if (trendsEl && scrollPos >= trendsEl.offsetTop - 80) {
+        setActiveTab('Emerging Trends')
+      } else if (mentionsEl && scrollPos >= mentionsEl.offsetTop) {
         setActiveTab('Mentions')
       } else if (alertsEl && scrollPos >= alertsEl.offsetTop - 80) {
         setActiveTab('Alerts')
@@ -75,6 +115,28 @@ export default function App() {
     setActionNotice('Alert approved and dispatched to safety team.')
     setTimeout(() => setActionNotice(''), 3000)
   }
+
+  const notify = (message) => {
+    setActionNotice(message)
+    setTimeout(() => setActionNotice(''), 3000)
+  }
+
+  const handleTrackTrend = (trend) => {
+    if (trackedTrends.includes(trend.id)) {
+      setTrackedTrends((prev) => prev.filter((id) => id !== trend.id))
+      notify(`Stopped tracking ${trend.name}.`)
+    } else {
+      setTrackedTrends((prev) => [...prev, trend.id])
+      notify(`Tracking ${trend.name}. You will be alerted on new spikes.`)
+    }
+  }
+
+  const filteredTrends = emergingTrends.filter((t) => {
+    const platformMatch =
+      trendPlatform === 'All' || t.platforms.includes(trendPlatform)
+    const stageMatch = trendStage === 'All' || t.stage === trendStage
+    return platformMatch && stageMatch
+  })
 
   const filteredPosts = recentPosts.filter((post) => {
     if (filterSource === 'All') return true
@@ -124,6 +186,15 @@ export default function App() {
               onClick={() => scrollToSection('mentions-section', 'Mentions')}
             >
               Mentions
+            </button>
+            <button
+              className={`nav-tab ${activeTab === 'Emerging Trends' ? 'active' : ''}`}
+              onClick={() => scrollToSection('trends-section', 'Emerging Trends')}
+            >
+              Emerging Trends
+              {trackedTrends.length > 0 && (
+                <span className="tab-pill tab-pill-trend">{trackedTrends.length}</span>
+              )}
             </button>
           </nav>
 
@@ -352,6 +423,156 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* Emerging Trends Section — what is coming up on social media */}
+        <section
+          className={`card trends-section ${highlightedId === 'trends-section' ? 'target-highlight' : ''}`}
+          id="trends-section"
+        >
+          <div className="card-header trends-header">
+            <div className="trends-header-text">
+              <h3>Emerging Trends</h3>
+              <p className="card-subtitle">
+                Trends we caught <em>before</em> they became news. Each card says what people
+                are posting, how fast it is growing, when it will likely peak, and what to do
+                about it.
+              </p>
+            </div>
+            <span className="card-tag">Forecast horizon 14 days</span>
+          </div>
+
+          {/* At a glance */}
+          <div className="trend-stat-row">
+            {trendSummary.map((s) => (
+              <div className="trend-stat" key={s.label}>
+                <span className="trend-stat-label">{s.label}</span>
+                <span className="trend-stat-value">{s.value}</span>
+                <span className="trend-stat-hint">{s.hint}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Plain-language legend so the badges need no explanation */}
+          <div className="stage-legend" aria-label="What the trend stages mean">
+            <span className="stage-legend-title">Stages</span>
+            {trendStages.map((s) => (
+              <div className="stage-legend-item" key={s.key}>
+                <span className={`stage-badge stage-${s.key}`}>{s.label}</span>
+                <span className="stage-legend-meaning">{s.meaning}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div className="trend-filters">
+            <div className="trend-filter-group">
+              <span className="trend-filter-label">Platform</span>
+              <div className="filter-pills">
+                {TREND_PLATFORMS.map((p) => (
+                  <button
+                    key={p}
+                    className={`pill ${trendPlatform === p ? 'active' : ''}`}
+                    onClick={() => setTrendPlatform(p)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="trend-filter-group">
+              <span className="trend-filter-label">Stage</span>
+              <div className="filter-pills">
+                {['All', ...trendStages.map((s) => s.label)].map((s) => (
+                  <button
+                    key={s}
+                    className={`pill ${trendStage === s ? 'active' : ''}`}
+                    onClick={() => setTrendStage(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <p className="trend-result-count">
+            Showing {filteredTrends.length} of {emergingTrends.length} trends &middot; sorted by
+            fastest growth
+            {trackedTrends.length > 0 && ` · ${trackedTrends.length} tracked`}
+          </p>
+
+          {filteredTrends.length === 0 ? (
+            <div className="empty-state">
+              <p>No trends match this filter yet. Try a wider platform or stage.</p>
+            </div>
+          ) : (
+            <div className="trends-grid">
+              {filteredTrends.map((t) => {
+                const isTracked = trackedTrends.includes(t.id)
+                const stageKey = t.stage.toLowerCase()
+                return (
+                  <article className={`trend-card stage-${stageKey} ${isTracked ? 'is-tracked' : ''}`} key={t.id}>
+                    <div className="trend-card-top">
+                      <span className={`stage-badge stage-${stageKey}`}>{t.stage}</span>
+                      <span className="trend-growth">{t.growth}</span>
+                    </div>
+
+                    <h4 className="trend-name">{t.name}</h4>
+                    <p className="trend-meta">
+                      {t.category} &middot; {t.platforms.join(' + ')}
+                    </p>
+                    <p className="trend-volume">{t.volume}</p>
+
+                    <p className="trend-summary">{t.summary}</p>
+
+                    <div className="trend-why">
+                      <span className="trend-why-label">Why it matters</span>
+                      <p>{t.why}</p>
+                    </div>
+
+                    <div className="trend-velocity">
+                      <span className="trend-velocity-label">7-day volume</span>
+                      <svg
+                        className="trend-spark"
+                        viewBox="0 0 100 28"
+                        preserveAspectRatio="none"
+                        role="img"
+                        aria-label={`7-day volume trend, latest ${t.velocity[t.velocity.length - 1]} index points`}
+                      >
+                        <path
+                          d={sparkPath(t.velocity)}
+                          vectorEffect="non-scaling-stroke"
+                          fill="none"
+                        />
+                      </svg>
+                    </div>
+
+                    <div className="trend-card-footer">
+                      <div className="trend-peak">
+                        <span>Peak window</span>
+                        <strong>{t.peak}</strong>
+                      </div>
+                      <div className="trend-actions">
+                        <span className={`move-badge ${moveClass[t.move]}`}>{t.move}</span>
+                        <button
+                          className={`btn btn-sm ${isTracked ? 'btn-secondary' : 'btn-primary'}`}
+                          onClick={() => handleTrackTrend(t)}
+                        >
+                          {isTracked ? 'Tracking' : 'Track'}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+
+          <p className="trend-footnote">
+            Built from public posts only. Forecasts are estimates, not guarantees. Re-scored every
+            15 minutes.
+          </p>
+        </section>
       </main>
 
       {/* Clean, Simple Footer */}
